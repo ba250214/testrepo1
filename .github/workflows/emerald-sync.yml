@@ -1,0 +1,64 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Sync with Emerald Configuration Services
+
+on:
+  push:
+    branches: '*_*'
+jobs:
+  publish_changes:
+    runs-on: ubuntu-latest
+    name: Sync with Emerald Services
+    env:
+        TARGET: ${GITHUB_REF_NAME%_*}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # OR "2" -> To retrieve the preceding commit.
+
+      - name: Set Environment Variables
+        run: |
+          echo "EMERALD_SECRET_NAME=${{format('{0}_{1}', github.actor, env.TARGET)}}" >> $GITHUB_ENV
+          echo "ORG_ID=${{format('{0}', env.TARGET)}}" >> $GITHUB_ENV
+          
+      - name: Get secret name
+        run: |
+          echo ${{env.ORG_ID}}
+          echo ${{env.EMERALD_SECRET_NAME}}
+          echo ${{vars.BASE_URL}}
+        
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v39.2.0
+        with:
+          json: "true"
+          files_ignore: |
+            .github/**
+            .gitignore
+            README.md
+
+      - name: "Auth GCP"
+        id: "auth"
+        uses: "google-github-actions/auth@v2"
+        with:
+          credentials_json: ${{ secrets.GCP_KEY }}
+ 
+      - name: "Set GKE credentials"
+        uses: "google-github-actions/get-gke-credentials@v2"
+        with:
+          cluster_name: "emerald-k8s-cluster-qa1"
+          location: "us-central1-f"
+
+      - name: Port forwarding
+        if: always()
+        run: |
+          kubectl port-forward service/selling-configuration -n selling-services-nightly 40001:40001 &
+
+      - uses: ncr-swt-retail/emerald-configuration-sync@v1.0.20
+        with:
+          org_id: ${{ env.ORG_ID }}
+          base_url: ${{ vars.BASE_URL }}
+          authorization_token: ${{ secrets[env.EMERALD_SECRET_NAME] }}
+          added_files: ${{ steps.changed-files.outputs.added_files }}
+          deleted_files: ${{ steps.changed-files.outputs.deleted_files }}
+          modified_files: ${{ steps.changed-files.outputs.modified_files }}
